@@ -1,134 +1,196 @@
-# CTRL+Shift+C kommentoi tai poistaa kommentit valituilta riveilt?
-library(forecast)
-# Asetetaan ty?hakemisto SET Working Directory
-# Muokkaa tarvittaessa oman ty?hakemistosi polku
-# RStudiossa t?m?n voi tehd? my?s valikosta Session->Set working directory
-setwd('Z:/Documents')
 
-# Luetaan s?hk?nkulutus- ja l?mp?tiladata, hyp?t??n headerrivin yli
-eletemp = read.table(file = "sahko.csv",
+# Luetaan sähkönkulutus- ja lämpötiladata, hypätään headerrivin yli
+eletemp = read.table(file=choose.files(),
                      sep = ";",
                      dec = ",",
                      skip = 1,
                      col.names = c('kWh','Celcius'))
 
-# S?hk?nkulutus aikasarjaksi
+# Sähkönkulutus ja lämpötila aikasarjoiksi
 ele = ts(eletemp$kWh[1:816], start = 1, frequency = 24)
-elemodel=auto.arima(ele)
-elemodel
-# L?mp?tila kahdeksi aikasarjaksi: 816 ensimm?ist? havaintoa k?ytet??n mallin estimointiin
-# ja 24 viimeist? havaintoa ennustamiseen.
 temp = ts(eletemp$Celcius, start = 1, frequency = 24)
 temp816 = ts(eletemp$Celcius[1:816], start = 1, frequency = 24)
-# start parametrina vektori: 817. tunti = 35. p?iv?n ensimm?inen tunti
 temp24 = ts(eletemp$Celcius[817:840], start = c(35,1), frequency = 24)
-par(mfrow=c(2,1))
+
 # Plotataan aikasarjat
-ts.plot(ele,
-     xlab = "aika/vrk",
-     ylab = "kulutus/kWh")
-                    
+ts.plot(ele, xlab = "aika/vrk", ylab = "kulutus/kWh")
+ts.plot(temp816, temp24, xlab = "aika/vrk", ylab = expression(~degree~C), col = c("black", "blue"))
 
-ts.plot(temp816,temp24,
-        xlab = "aika/vrk",
-        ylab = expression(~degree~C),
-        col = c("black", "blue"))
-
-# M??ritell??n 2x2 plottausruudukko.
+# Plotataan autokorrelaatio-, osittaisautokorrelaatio- ja ristikorrelaatiofunktiot
 par(mfrow=c(2,2))
-# Jos haluat katsoa kuvia 2x2 matriisin sijaan yksitellen, niin
-# par(mfrow=c(1,1))
-
-# Plotataan autokorrelaatio-, osittaisautokorrelaatio- ja ristikorrelaatiofunktiot.
-acf(ele, lag.max=168)
+acf(ele, lag.max=816)
 acf(ele, lag.max=168, type = "partial")
-acf(temp, lag.max=168)
-acf(temp, lag.max=, type = "partial")
-# Piirret??n ristikorrelaatiofunktio omaan kuvaan
+acf(temp, lag.max=814)
+acf(temp, lag.max=168, type = "partial")
 par(mfrow=c(1,1))
-ccf(ele,temp, lag.max=168)
+ccf(ele,temp, lag.max=816)
+
+
+#Differoidut aikasarjat (viikottainen ja päivittäinen trendi):
+dele = diff(diff(diff(ele, lag = 168), lag = 24), lag = 1)
+dtemp = diff(diff(diff(temp, lag = 168), lag = 24), lag = 1)
+
+#Tulostus:
 par(mfrow=c(2,2))
-# Stationarisoidaan aikasarjat. M??rittele parametrit d,S,D
-# Huomaa, ett? s?hk?nkulutuksen ja l?mp?tilan aikasarjojen differointien asteiden ei v?ltt?m?tt? tarvitse olla samoja.
-d = 1
-d =1  # Differoinnin kertaluku d
-S1 = 24
-S2 = 24     # Kausidifferoinnin jakso S
+acf(dele, lag.max=816, main="ACF: Differoitu sähkö")
+acf(dele, lag.max=816, type = "partial", main="PACF: Differoitu sähkö")
+acf(dtemp, lag.max=816, main="ACF: Differoitu lämpötila")
+acf(dtemp, lag.max=816, type = "partial", main="PACF: Differoitu lämpötila")
 
-D = 1 # Kausidifferensoinnin kertaluku D
-dele = ele
-dtemp = temp
-if (d2 > 0) {
-  dele = diff(dele, lag = 1, differences = d)
-  dtemp = diff(dtemp, lag = 1, differences = d)
-}
-if (D > 0) {
-  dele = diff(dele, lag = S1, differences = D)
-  dele = diff(dele, lag = 168, differences = D)
-  dtemp = diff(dtemp, lag = S2, differences = D)
-}
+#Ristikorrelaatio
+par(mfrow=c(1,1))
+ccf(dele, dtemp, lag.max=168, main="CCF: Differoidut sähkö ja lämpötila")
 
-# Differoitujen aikasarjojen autokorrelaatio-, osittaisautokorrelaatio- ja ristikorrelaatiofunktiot.
-acf(dele, lag.max=816)
-acf(dele, lag.max=816, type = "partial")
+#Lähdetään rakentamaan mallia:
+# Poistetaan viikkovaihtelu sähkönkulutuksesta manuaalisesti
+dele168 = diff(ele, lag = 168, differences = 1)
 
-acf(dtemp, lag.max=816)
-acf(dtemp, lag.max=816, type = "partial")
-ccf(dele, dtemp, lag.max=816)
+#Valitaan kertaluvut:
+p = 1 # 2
+d = 0 # 0
+q = 1 #1
+P = 1 #1
+D = 1 #1 
+Q = 1 #1
 
-# Estimoidaan malli ja lasketaan ennusteet ilman ulkoista muuttujaa.
-p = 1
-q = 1
-P = 2
-Q = 0
-malli = arima(ele,
+#Estimoidaan malli ilman lämpötilaa (sarima)
+malli = arima(dele168,
               order = c(p,d,q),
-              seasonal = list(order = c(P, D, Q),period = S),
+              seasonal = list(order = c(P, D, Q), period = 24),
               method = "CSS")
-enne = predict(malli, n.ahead = 24)
-plot(enne)
-# Estimoidaan malli l?mp?tilan kanssa. M??r?? l?mp?tilan mahdollinen viive L.
-L = 1
-tempestimointi = eletemp$Celcius[1:(816-L)]
-tempennuste = eletemp$Celcius[(816-L+1):(816-L+24)]
-eleestimointi = ts(eletemp$kWh[(1+L):816], start = 1, frequency = 24)
-malli2 = arima(eleestimointi,
-               order = c(p,d,q),
-               seasonal = list(order = c(P, D, Q), period = S),
-               xreg = tempestimointi,
-               method = "CSS")
-enne2 = predict(malli2,
-                n.ahead = 24,
-                newxreg = tempennuste)
+#Lämpötilan viive
+L = 0
 
-# Esimerkki Portmanteau-testist?. Onko residuaaliaikasarjan alussa nollia?
-Box.test(malli$residuals,
-         lag = 20,
+# Kohdistetaan sähkö ja lämpötila L tunnin viiveen mukaisesti
+ele_mod = ts(eletemp$kWh[(1+L):816], frequency = 24)
+temp_mod = ts(eletemp$Celcius[1:(816-L)], frequency = 24)
+
+#Differoidaan molemmista aikasarjoista viikottainen trendi
+dele168_mod = diff(ele_mod, lag = 168)
+dtemp168_mod = diff(temp_mod, lag = 168)
+
+# Estimoidaan malli 2, xreg-muuttujana differoitu lämpötila(Sarimax)
+malli2 = arima(dele168_mod,
+               order = c(p,d,q),
+               seasonal = list(order = c(P, D, Q), period = 24),
+               xreg = dtemp168_mod,
+               method = "CSS")
+
+#Ennustetta varten tarvitaan (t-L) hetken lämpötilat
+temp_uusi = eletemp$Celcius[(817-L):(840-L)]
+#niistä täytyy vähentää 168h takaiset arvot, jotta xreg pysyy differoituna!
+temp_uusi_vanha = eletemp$Celcius[(817-L-168):(840-L-168)]
+dtemp_uusi = temp_uusi - temp_uusi_vanha
+
+# Lasketaan ennusteet mallille 2
+enne2 = predict(malli2, n.ahead = 24, newxreg = dtemp_uusi)
+
+#Tehdään ennuste:
+# Koska syötimme ARIMA:lle differoitua dataa, predict antaa differoituja ennusteita.
+# Palautetaan todellinen taso lisäämällä ennusteeseen viikon (168h) takainen toteutunut arvo.
+ennuste_final = c(1:24)
+clyla_final = c(1:24)
+clala_final = c(1:24)
+
+for (x in 1:24) {
+  # Haetaan toteutunut kWh täsmälleen 168 tuntia (1 viikko) aiemmin
+  historia_arvo = eletemp$kWh[816 - 168 + x]
+  ennuste_final[x] = historia_arvo + enne2$pred[x]
+  clyla_final[x]   = ennuste_final[x] + 1.96 * enne2$se[x]
+  clala_final[x]   = ennuste_final[x] - 1.96 * enne2$se[x]
+}
+
+# Tehdään R:n aikasarjaobjekteja plottausta varten
+ennuste_ts = ts(ennuste_final, start = c(35,1), frequency = 24)
+clyla_ts   = ts(clyla_final, start = c(35,1), frequency = 24)
+clala_ts   = ts(clala_final, start = c(35,1), frequency = 24)
+
+#Diagnostiikka: Onko residuaaleissa enää säännönmukaisuutta?
+#Haetaan residuaalit
+acf(malli2$residuals, lag.max=816, main="Malli2: Residuaalien ACF")
+Box.test(malli2$residuals,
+         lag = 48,
          type = "Ljung-Box",
          fitdf = p + q + P + Q)
 
-# Palautetaan plottaus normaaliin 1x1 ruutuun
-par(mfrow=c(1,1))
+#Samat mallille ilman lämpötilan viivettä:
+acf(malli$residuals, lag.max=816, main="Malli: Residuaalien ACF")
+Box.test(malli$residuals,
+         lag = 48,
+         type = "Ljung-Box",
+         fitdf = p + q + P + Q)
 
-# Plotataan kuva sahkonkulutusaikasarjasta, mallin (1) sovitteesta,
-# ennusteesta ja ennusteen 95 %:n eli 1,96*sigma-luottamusv?leist?.
+
+# Plotataan kuva pelkästä ennusteesta luottamusväleineen
+ts.plot(ennuste_ts,
+        clyla_ts,
+        clala_ts,
+        col = c("black", "blue", "red"),
+        main = "Lämpötilamallin ennuste ja 95 % luottamusvälit",
+        ylab = "kWh")
+
+# Kirjoitetaan LOPULLISET (integroidut) ennusteet Exceliä varten csv:ksi!
+output = cbind(ennuste_final, clyla_final, clala_final)
+
+
+# Kohdistetaan sovite oikeaan kohtaan aikasarjaa (alkaa viipeiden L+168 jälkeen)
+L = 2
+alku_indeksi <- 1 + L + 168 
+sovite_arvot <- ele[alku_indeksi:816] - malli2$residuals
+
+sovite_ts <- ts(sovite_arvot, start = c(8, 3), frequency = 24)
+
+par(mfrow=c(2,2))
+# Plotataan kuva käyttäen palautettuja ts-objekteja (ennuste_ts, clyla_ts, clala_ts)
 ts.plot(ele,
-        ele - malli$residuals,
-        enne$pred,
-        enne$pred + 1.96*enne$se,
-        enne$pred - 1.96*enne$se,
-        col = c("black", "red", "blue", "blue", "blue"),
-        main  = "Sovite ja ennuste")
+        sovite_ts,
+        ennuste_ts,
+        clyla_ts,
+        clala_ts,
+        col = c("black", "red", "green", "blue", "purple"),
+        main  = "Sähkönkulutus: Sovite ja ennuste (SARIMAX)",
+        ylab = "Kulutus (kWh)",
+        xlab = "Aika (vrk)",
+        lty = c(1, 1, 1, 2, 2),
+        xlim = c(34, 36))
 
-# Plotataan kuva pelk?st? ennusteesta.
-ts.plot(enne$pred,
-        enne$pred + 1.96*enne$se,
-        enne$pred - 1.96*enne$se,
-        col = c("black", "blue", "blue"),
-        main = "Ennuste ja  95 %:n luottamusv?lit")
+# Palautetaan malli1:n ennusteet todelliselle kWh-tasolle
+ennuste_final1 = c(1:24)
+clyla_final1 = c(1:24)
+clala_final1 = c(1:24)
 
-# Kirjoitetaan ennuste ja luottamusv?lit .csv-tiedostoon, jonka voi avata Excelill?.
-output = cbind(enne$pred,
-               enne$pred + 1.96*enne$se,
-               enne$pred - 1.96*enne$se)
-write.csv2(output, file = 'ennuste.csv')
+for (x in 1:24) {
+  # Haetaan toteutunut kWh täsmälleen 168 tuntia (1 viikko) aiemmin
+  historia_arvo = eletemp$kWh[816 - 168 + x]
+  
+  ennuste_final1[x] = historia_arvo + enne$pred[x]
+  clyla_final1[x]   = ennuste_final1[x] + 1.96 * enne$se[x]
+  clala_final1[x]   = ennuste_final1[x] - 1.96 * enne$se[x]
+}
+
+# Tehdään R:n aikasarjaobjekteja plottausta varten (malli1)
+ennuste_ts1 = ts(ennuste_final1, start = c(35,1), frequency = 24)
+clyla_ts1   = ts(clyla_final1, start = c(35,1), frequency = 24)
+clala_ts1   = ts(clala_final1, start = c(35,1), frequency = 24)
+
+# Kohdistetaan malli1:n sovite oikeaan kohtaan (alkaa viipeen 168 jälkeen)
+alku_indeksi1 <- 1 + 168 
+sovite_arvot1 <- ele[alku_indeksi1:816] - malli$residuals
+sovite_ts1 <- ts(sovite_arvot1, start = c(8, 1), frequency = 24)
+
+# Plotataan kuva mallille 1
+ts.plot(ele,
+        sovite_ts1,
+        ennuste_ts1,
+        clyla_ts1,
+        clala_ts1,
+        col = c("black", "red", "green", "blue", "purple"),
+        main  = "Sähkönkulutus: Sovite ja ennuste (SARIMA ilman lämpötilaa)",
+        ylab = "Kulutus (kWh)",
+        xlab = "Aika (vrk)",
+        lty = c(1, 1, 1, 2, 2),
+        xlim = c(34, 36))
+
+output = cbind(ennuste_final, clyla_final, clala_final)
+
+write.csv2(output, file = "ennuste_output.csv", row.names = FALSE)
