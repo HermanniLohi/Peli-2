@@ -1,6 +1,12 @@
+<<<<<<< HEAD
 
 # Luetaan sähkönkulutus- ja lämpötiladata, hypätään headerrivin yli
 eletemp = read.table(file=choose.files(),
+=======
+#setwd('Z:/Downloads')
+# Luetaan sähkönkulutus- ja lämpötiladata, hypätään headerrivin yli
+eletemp = read.table(file = file.choose(),
+>>>>>>> 84ddeb645f84e165708cd980550b6da3f24b8738
                      sep = ";",
                      dec = ",",
                      skip = 1,
@@ -46,6 +52,7 @@ ccf(dele, dtemp, lag.max=168, main="CCF: Differoidut sähkö ja lämpötila")
 dele168 = diff(ele, lag = 168, differences = 1)
 
 #Valitaan kertaluvut:
+<<<<<<< HEAD
 p = 1 # 2
 d = 0 # 0
 q = 1 #1
@@ -61,6 +68,23 @@ malli = arima(dele168,
 #Lämpötilan viive
 L = 0
 
+=======
+p = 2
+d = 0
+q = 1
+P = 1
+D = 1
+Q = 1
+
+#Esitmoidaan malli ilman lämpötilaa (sarima)
+malli = arima(dele168,
+              order = c(p,d,q),
+              seasonal = list(order = c(P, D, Q), period = 24),
+              method = "CSS")
+#Lämpötilan viive
+L = 2
+
+>>>>>>> 84ddeb645f84e165708cd980550b6da3f24b8738
 # Kohdistetaan sähkö ja lämpötila L tunnin viiveen mukaisesti
 ele_mod = ts(eletemp$kWh[(1+L):816], frequency = 24)
 temp_mod = ts(eletemp$Celcius[1:(816-L)], frequency = 24)
@@ -120,7 +144,10 @@ Box.test(malli$residuals,
          type = "Ljung-Box",
          fitdf = p + q + P + Q)
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 84ddeb645f84e165708cd980550b6da3f24b8738
 # Plotataan kuva pelkästä ennusteesta luottamusväleineen
 ts.plot(ennuste_ts,
         clyla_ts,
@@ -137,7 +164,10 @@ output = cbind(ennuste_final, clyla_final, clala_final)
 L = 2
 alku_indeksi <- 1 + L + 168 
 sovite_arvot <- ele[alku_indeksi:816] - malli2$residuals
+<<<<<<< HEAD
 
+=======
+>>>>>>> 84ddeb645f84e165708cd980550b6da3f24b8738
 sovite_ts <- ts(sovite_arvot, start = c(8, 3), frequency = 24)
 
 par(mfrow=c(2,2))
@@ -194,3 +224,82 @@ ts.plot(ele,
 output = cbind(ennuste_final, clyla_final, clala_final)
 
 write.csv2(output, file = "ennuste_output.csv", row.names = FALSE)
+<<<<<<< HEAD
+=======
+
+# Määritellään kausiparametrit, jotka pidetään samoina
+P = 1
+D = 1
+Q = 1
+
+# Luodaan kaikki mahdolliset (p, d, q) kombinaatiot väliltä 0-2
+kombinaatiot <- expand.grid(p = 0:2, d = 0:2, q = 0:2)
+
+# Tehdään tyhjä taulukko (data frame) tulosten tallentamista varten
+tulokset <- data.frame(p=integer(), d=integer(), q=integer(), 
+                       p_arvo_malli1=numeric(), p_arvo_malli2=numeric())
+
+cat("Aloitetaan mallien iterointi. Tämä voi kestää hetken...\n")
+
+# Käydään läpi jokainen kombinaatio for-loopilla
+for (i in 1:nrow(kombinaatiot)) {
+  
+  p_test <- kombinaatiot$p[i]
+  d_test <- kombinaatiot$d[i]
+  q_test <- kombinaatiot$q[i]
+  
+  # Vapausasteet testille
+  fitdf_val <- p_test + q_test + P + Q
+  
+  # Alustetaan p-arvot nollaksi (jos malli kaatuu, arvo pysyy nollana)
+  pval1 <- 0
+  pval2 <- 0
+  
+  # --- MALLI 1: SARIMA (ilman lämpötilaa) ---
+  tryCatch({
+    temp_malli1 <- arima(dele168,
+                         order = c(p_test, d_test, q_test),
+                         seasonal = list(order = c(P, D, Q), period = 24),
+                         method = "CSS")
+    
+    # Ljung-Box testi (lag oltava suurempi kuin fitdf)
+    test1 <- Box.test(temp_malli1$residuals, lag = 48, type = "Ljung-Box", fitdf = p+q+P+Q)
+    pval1 <- test1$p.value
+  }, error = function(e) {}) # Ohitetaan virheet vähin äänin
+  
+  
+  # --- MALLI 2: SARIMAX (lämpötilan kanssa) ---
+  tryCatch({
+    temp_malli2 <- arima(dele168_mod,
+                         order = c(p_test, d_test, q_test),
+                         seasonal = list(order = c(P, D, Q), period = 24),
+                         xreg = dtemp168_mod,
+                         method = "CSS")
+    
+    test2 <- Box.test(temp_malli2$residuals, lag = 48, type = "Ljung-Box", fitdf = p+q+P+Q)
+    pval2 <- test2$p.value
+  }, error = function(e) {}) 
+  
+  
+  # Tallennetaan kierroksen tulokset taulukkoon
+  tulokset <- rbind(tulokset, data.frame(p=p_test, d=d_test, q=q_test, 
+                                         p_arvo_malli1=pval1, 
+                                         p_arvo_malli2=pval2))
+}
+
+# Tulostetaan koko taulukko, jotta näette kaikki testatut arvot
+print("Kaikkien testattujen mallien p-arvot:")
+print(tulokset)
+
+# Etsitään rivit, joilla on korkeimmat p-arvot
+paras_1 <- tulokset[which.max(tulokset$p_arvo_malli1), ]
+paras_2 <- tulokset[which.max(tulokset$p_arvo_malli2), ]
+
+cat("\n--------------------------------------------------\n")
+cat("PARAS KERTALUKUPARI MALLILLE 1 (SARIMA ilman lämpötilaa):\n")
+cat("p =", paras_1$p, ", d =", paras_1$d, ", q =", paras_1$q, "| p-arvo =", paras_1$p_arvo_malli1, "\n")
+
+cat("\nPARAS KERTALUKUPARI MALLILLE 2 (SARIMAX lämpötilalla):\n")
+cat("p =", paras_2$p, ", d =", paras_2$d, ", q =", paras_2$q, "| p-arvo =", paras_2$p_arvo_malli2, "\n")
+cat("--------------------------------------------------\n")
+>>>>>>> 84ddeb645f84e165708cd980550b6da3f24b8738
